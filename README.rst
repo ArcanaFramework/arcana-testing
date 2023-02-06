@@ -1,9 +1,9 @@
-Arcana Extension - TODO
+Arcana Extension - testing
 =======================
-.. .. image:: https://github.com/arcanaframework/arcana-TODO/actions/workflows/tests.yml/badge.svg
-..    :target: https://github.com/arcanaframework/arcana-TODO/actions/workflows/tests.yml
-.. .. image:: https://codecov.io/gh/arcanaframework/arcana-TODO/branch/main/graph/badge.svg?token=UIS0OGPST7
-..    :target: https://codecov.io/gh/arcanaframework/arcana-TODO
+.. .. image:: https://github.com/arcanaframework/arcana-testing/actions/workflows/tests.yml/badge.svg
+..    :target: https://github.com/arcanaframework/arcana-testing/actions/workflows/tests.yml
+.. .. image:: https://codecov.io/gh/arcanaframework/arcana-testing/branch/main/graph/badge.svg?token=UIS0OGPST7
+..    :target: https://codecov.io/gh/arcanaframework/arcana-testing
 .. image:: https://readthedocs.org/projects/arcana/badge/?version=latest
   :target: http://arcana.readthedocs.io/en/latest/?badge=latest
   :alt: Documentation Status
@@ -13,7 +13,7 @@ This is a template repository for extensions to the Arcana_ framework. Please ad
 to provide your own extension to the Arcana_ framework.
 
 After creating a new extension repository from this template, firstly do a global
-search for "TODO" and replace it with the name of your package to update the package
+search for "testing" and replace it with the name of your package to update the package
 settings. Also, update the author and maintainer tags in the "[project]" Section of the
 the ``pyproject.toml``.
 
@@ -44,7 +44,7 @@ Quick Installation
 
 This extension can be installed for Python 3 using *pip*::
 
-    $ pip3 install arcana-TODO
+    $ pip3 install arcana-testing
 
 This will also install the core Arcana_ package and any required dependencies.
 
