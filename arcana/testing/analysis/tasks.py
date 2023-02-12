@@ -1,9 +1,13 @@
+import os
 import shutil
 from pathlib import Path
 import typing as ty
 import attrs
 from pydra import mark, Workflow
 from arcana.core.data.row import DataRow
+
+
+PathTypes = ty.Union[str, bytes, os.PathLike]
 
 
 @mark.task
@@ -44,7 +48,7 @@ def attrs_func(a, b):
 @mark.task
 @mark.annotate({"return": {"out_file": Path}})
 def concatenate(
-    in_file1: Path, in_file2: Path, out_file: Path = None, duplicates: int = 1
+    in_file1: PathTypes, in_file2: PathTypes, out_file: Path = None, duplicates: int = 1
 ) -> Path:
     """Concatenates the contents of two files and writes them to a third
 
@@ -76,7 +80,7 @@ def concatenate(
 
 @mark.task
 @mark.annotate({"return": {"out_file": Path}})
-def reverse(in_file: Path, out_file: Path = None) -> Path:
+def reverse(in_file: PathTypes, out_file: PathTypes = None) -> Path:
     """Reverses the contents of a file and outputs it to another file
 
     Parameters
@@ -156,15 +160,15 @@ def plus_10_to_filenumbers(filenumber_row: DataRow) -> None:
 
 
 @mark.task
-def identity_file(in_file: Path) -> Path:
+def identity_file(in_file: PathTypes) -> Path:
     return in_file
 
 
 @mark.task
 def multiply_contents(
-    in_file: Path,
+    in_file: PathTypes,
     multiplier: ty.Union[int, float],
-    out_file: Path = None,
+    out_file: PathTypes = None,
     dtype: type = float,
 ) -> Path:
     """Multiplies the contents of the file, assuming that it contains numeric
@@ -198,7 +202,7 @@ def multiply_contents(
 
 
 @mark.task
-def contents_are_numeric(in_file: Path) -> bool:
+def contents_are_numeric(in_file: PathTypes) -> bool:
     """Checks the contents of a file to see whether each line can be cast to a numeric
     value
 
@@ -222,7 +226,7 @@ def contents_are_numeric(in_file: Path) -> bool:
 
 
 @mark.task
-def check_license(expected_license_path: str, expected_license_contents: Path) -> Path:
+def check_license(expected_license_path: str, expected_license_contents: PathTypes) -> Path:
     """Checks the `expected_license_path` to see if there is a file with the same contents
     as that of `expected_license_contents`
 
