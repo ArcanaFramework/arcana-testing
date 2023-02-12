@@ -1,13 +1,5 @@
 Arcana Extension - testing
 ==========================
-.. image:: https://github.com/arcanaframework/arcana-testing/actions/workflows/tests.yml/badge.svg
-    :target: https://github.com/arcanaframework/arcana-testing/actions/workflows/tests.yml
-.. image:: https://codecov.io/gh/arcanaframework/arcana-testing/branch/main/graph/badge.svg?token=UIS0OGPST7
-    :target: https://codecov.io/gh/arcanaframework/arcana-testing
-.. image:: https://readthedocs.org/projects/arcana/badge/?version=latest
-    :target: http://arcana.readthedocs.io/en/latest/?badge=latest
-    :alt: Documentation Status
-
 
 This is the "testing" extension to the Arcana_ framework, which adds basic classes
 used in test routines of the core package.
