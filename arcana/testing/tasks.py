@@ -4,6 +4,7 @@ from pathlib import Path
 import typing as ty
 import attrs
 from pydra import mark, Workflow
+import fileformats.text
 from arcana.core.data.row import DataRow
 
 
@@ -145,7 +146,7 @@ def concatenate_reverse(name="concatenate_reverse", **kwargs):
 
 @mark.task
 def plus_10_to_filenumbers(filenumber_row: DataRow) -> None:
-    """Alters the item paths within the data row (unresolved), by converting them to
+    """Alters the item paths within the data row, by converting them to
     an int and adding 10. Used in the test_run_pipeline_on_row_cli test.
 
     Parameters
@@ -154,9 +155,9 @@ def plus_10_to_filenumbers(filenumber_row: DataRow) -> None:
         the data row to modify
     """
     for entry in filenumber_row.entries:
-        item_fspath = next(iter(entry.item.fspaths)).parent
-        new_item_path = str(int(entry.path) + 10)
-        shutil.move(item_fspath, item_fspath.parent / new_item_path)
+        item = fileformats.text.Plain(entry.item)
+        new_item_stem = str(int(item.stem) + 10)
+        shutil.move(item.fspath, item.fspath.parent / (new_item_stem + item.actual_ext))
 
 
 @mark.task

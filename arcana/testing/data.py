@@ -79,7 +79,7 @@ class MockRemoteStore(RemoteStore):
     NODES_DIR = "nodes"
     FIELDS_FILE = "__FIELD__"
 
-    def scan_tree(self, tree: DataTree):
+    def populate_tree(self, tree: DataTree):
         """
         Find all data rows for a dataset in the store and populate the
         Dataset object using its `add_leaf` method.
@@ -99,7 +99,7 @@ class MockRemoteStore(RemoteStore):
             ids = self.get_ids_from_row_dirname(row_dir)
             tree.add_leaf([ids[str(h)] for h in tree.hierarchy])
 
-    def scan_row(self, row: DataRow):
+    def populate_row(self, row: DataRow):
         """
         Find all data items within a data row and populate the DataRow object
         with them using the `add_fileset` and `add_field` methods.
