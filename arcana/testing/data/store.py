@@ -15,7 +15,7 @@ from arcana.core.data.entry import DataEntry
 from arcana.core.data.space import DataSpace
 
 
-@attrs.define
+@attrs.define(kw_only=True)
 class MockRemoteStore(RemoteStore):
     """A simple data store to test store CLI.
 
@@ -35,14 +35,7 @@ class MockRemoteStore(RemoteStore):
     /path/to/dataset/nodes/a=1.b=3.c=1/
     """
 
-    server: str = None  # Not used, just there to test `arcana store add` CLI
-    name: str = "mock-remote"
-    user: str = None  # Not used, just there to test `arcana store add` CLI
-    password: str = None  # Not used, just there to test `arcana store add` CLI
-    cache_dir: Path = attrs.field(
-        converter=lambda x: Path(x) if x is not None else x, default=None
-    )  # Only used to store the site-licenses in
-
+    mock_remote_dir: Path
     mock_delay: int = 0
     connected: bool = False
     "Mock delay used to simulate time it takes to download from remote"
@@ -50,7 +43,7 @@ class MockRemoteStore(RemoteStore):
     SITE_LICENSES_DIR = "LICENSE"
     METADATA_DIR = ".definition"
     LEAVES_DIR = "leaves"
-    NODES_DIR = "nodes"
+    DERIVS_DIR = "derivatives"
     FIELDS_FILE = "__FIELD__"
     CHECKSUMS_FILE = "__CHECKSUMS__.json"
 
@@ -68,16 +61,17 @@ class MockRemoteStore(RemoteStore):
         dataset : Dataset
             The dataset to populate with rows
         """
-        self._check_connected()
-        leaves_dir = Path(tree.dataset_id) / self.LEAVES_DIR
-        if not leaves_dir.exists():
-            raise RuntimeError(
-                f"Leaves dir {leaves_dir} for flat-dir data store doesn't exist, which "
-                "means it hasn't been initialised properly"
-            )
-        for row_dir in self.iterdir(leaves_dir):
-            ids = self.get_ids_from_row_dirname(row_dir)
-            tree.add_leaf([ids[str(h)] for h in tree.hierarchy])
+        with self.connection:
+            self._check_connected()
+            leaves_dir = self.dataset_fspath(tree.dataset_id) / self.LEAVES_DIR
+            if not leaves_dir.exists():
+                raise RuntimeError(
+                    f"Leaves dir {leaves_dir} for flat-dir data store doesn't exist, which "
+                    "means it hasn't been initialised properly"
+                )
+            for row_dir in self.iterdir(leaves_dir):
+                ids = self.get_ids_from_row_dirname(row_dir)
+                tree.add_leaf([ids[str(h)] for h in tree.hierarchy])
 
     def populate_row(self, row: DataRow):
         """
@@ -89,21 +83,22 @@ class MockRemoteStore(RemoteStore):
         row : DataRow
             The data row to populate with items
         """
-        self._check_connected()
-        row_dir = self.get_row_path(row)
-        if not row_dir.exists():
-            return
-        for entry_path in self.iterdir(row_dir, skip_suffixes=[".json"]):
-            datatype = (
-                Field
-                if entry_path / self.FIELDS_FILE in entry_path.iterdir()
-                else FileSet
-            )
-            row.add_entry(
-                path=entry_path.name,
-                datatype=datatype,
-                uri=entry_path,
-            )
+        with self.connection:
+            self._check_connected()
+            row_dir = self.get_row_path(row)
+            if not row_dir.exists():
+                return
+            for entry_path in self.iterdir(row_dir, skip_suffixes=[".json"]):
+                datatype = (
+                    Field
+                    if entry_path / self.FIELDS_FILE in entry_path.iterdir()
+                    else FileSet
+                )
+                row.add_entry(
+                    path=entry_path.name,
+                    datatype=datatype,
+                    uri=entry_path.relative_to(self.mock_remote_dir),
+                )
 
     def save_dataset_definition(
         self, dataset_id: str, definition: ty.Dict[str, ty.Any], name: str
@@ -186,7 +181,7 @@ class MockRemoteStore(RemoteStore):
         self, blueprint: TestDatasetBlueprint, dataset_id: str, source_data: Path = None
     ):
         """Create test data within store for test routines"""
-        dataset_path = Path(dataset_id) / self.LEAVES_DIR
+        dataset_path = self.dataset_fspath(dataset_id) / self.LEAVES_DIR
         dataset_path.mkdir(parents=True)
         for ids in self.iter_test_blueprint(blueprint):
             row_path = dataset_path / self.get_row_dirname_from_ids(
@@ -203,28 +198,29 @@ class MockRemoteStore(RemoteStore):
 
     def download_files(self, entry: DataEntry, download_dir: Path, target_path: Path):
         self._check_connected()
-        fileset = FileSet(self.iterdir(entry.uri))
+        fileset = FileSet(self.iterdir(self.entry_fspath(entry)))
         time.sleep(self.mock_delay)
         fileset.copy_to(target_path)
 
     def upload_files(self, cache_path: Path, entry: DataEntry):
         self._check_connected()
-        if entry.uri.exists():
-            shutil.rmtree(entry.uri)
-        shutil.copytree(cache_path, entry.uri, make_dirs=True)
+        entry_fspath = self.entry_fspath(entry)
+        if entry_fspath.exists():
+            shutil.rmtree(entry_fspath)
+        shutil.copytree(cache_path, entry_fspath, make_dirs=True)
         checksums = self.calculate_checksums(FileSet(cache_path.iterdir()))
         with open(cache_path / self.CHECKSUMS_FILE, "w") as f:
             json.dump(checksums, f)
 
     def download_value(self, entry: DataEntry):
         self._check_connected()
-        with open(entry.uri / self.FIELDS_FILE) as f:
+        with open(self.entry_fspath(entry) / self.FIELDS_FILE) as f:
             value = f.read()
         return value
 
     def upload_value(self, value, entry: DataEntry):
         self._check_connected()
-        with open(entry.uri / self.FIELDS_FILE, "w") as f:
+        with open(self.entry_fspath(entry) / self.FIELDS_FILE, "w") as f:
             f.write(str(value))
 
     def create_fileset_entry(
@@ -270,32 +266,40 @@ class MockRemoteStore(RemoteStore):
     # Helper methods #
     ##################
 
+    def dataset_fspath(self, dataset):
+        dataset_id = dataset.id if not isinstance(dataset, str) else dataset
+        return self.mock_remote_dir / dataset_id
+
+    def entry_fspath(self, entry):
+        return self.dataset_fspath(entry.row.dataset) / entry.uri
+
     def create_entry(self, path: str, datatype: type, row: DataRow) -> DataEntry:
         self._check_connected()
-        return row.add_entry(
+        entry = row.add_entry(
             path=path, datatype=datatype, uri=self.get_row_path(row) / path
         )
+        self.entry_fspath(entry).mkdir(parents=True)
+        return entry
 
     def definition_save_path(self, dataset_id, name):
-        return Path(dataset_id) / self.METADATA_DIR / (name + ".yml")
+        return self.dataset_fspath(dataset_id) / self.METADATA_DIR / (name + ".yml")
 
-    @classmethod
-    def get_row_path(cls, row: DataRow):
-        dataset_path = Path(row.dataset.id)
+    def get_row_path(self, row: DataRow):
+        dataset_fspath = self.dataset_fspath(row.dataset)
         if row.frequency == max(row.dataset.space):
             row_path = (
-                dataset_path
-                / cls.LEAVES_DIR
-                / cls.get_row_dirname_from_ids(row.ids, row.dataset.hierarchy)
+                dataset_fspath
+                / self.LEAVES_DIR
+                / self.get_row_dirname_from_ids(row.ids, row.dataset.hierarchy)
             )
         else:
             if not row.frequency:  # root frequency
                 row_dirname = str(row.frequency)
             else:
-                row_dirname = cls.get_row_dirname_from_ids(
+                row_dirname = self.get_row_dirname_from_ids(
                     row.ids, row.frequency.span()
                 )
-            row_path = dataset_path / cls.NODES_DIR / row_dirname
+            row_path = dataset_fspath / self.NODES_DIR / row_dirname
         return row_path
 
     @classmethod
