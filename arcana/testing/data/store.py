@@ -4,45 +4,15 @@ import json
 import shutil
 from pathlib import Path
 import attrs
+import time
 import yaml
-from fileformats.core.base import FileSet, DataType, Field
+from fileformats.core.base import FileSet, Field
 from arcana.core.data.store import RemoteStore
 from arcana.core.data.testing import TestDatasetBlueprint
 from arcana.core.data.row import DataRow
 from arcana.core.data.tree import DataTree
 from arcana.core.data.entry import DataEntry
 from arcana.core.data.space import DataSpace
-from arcana.core.exceptions import DatatypeUnsupportedByStoreError
-
-
-class TestDataSpace(DataSpace):
-    """Dummy data dimensions for ease of testing"""
-
-    # Per dataset
-    _ = 0b0000
-
-    # Basis
-    a = 0b1000
-    b = 0b0100
-    c = 0b0010
-    d = 0b0001
-
-    # Secondary combinations
-    ab = 0b1100
-    ac = 0b1010
-    ad = 0b1001
-    bc = 0b0110
-    bd = 0b0101
-    cd = 0b0011
-
-    # Tertiary combinations
-    abc = 0b1110
-    abd = 0b1101
-    acd = 0b1011
-    bcd = 0b0111
-
-    # Leaf rows
-    abcd = 0b1111
 
 
 @attrs.define
@@ -73,11 +43,20 @@ class MockRemoteStore(RemoteStore):
         converter=lambda x: Path(x) if x is not None else x, default=None
     )  # Only used to store the site-licenses in
 
+    mock_delay: int = 0
+    connected: bool = False
+    "Mock delay used to simulate time it takes to download from remote"
+
     SITE_LICENSES_DIR = "LICENSE"
     METADATA_DIR = ".definition"
     LEAVES_DIR = "leaves"
     NODES_DIR = "nodes"
     FIELDS_FILE = "__FIELD__"
+    CHECKSUMS_FILE = "__CHECKSUMS__.json"
+
+    #############################
+    # DataStore abstractmethods #
+    #############################
 
     def populate_tree(self, tree: DataTree):
         """
@@ -89,6 +68,7 @@ class MockRemoteStore(RemoteStore):
         dataset : Dataset
             The dataset to populate with rows
         """
+        self._check_connected()
         leaves_dir = Path(tree.dataset_id) / self.LEAVES_DIR
         if not leaves_dir.exists():
             raise RuntimeError(
@@ -109,6 +89,7 @@ class MockRemoteStore(RemoteStore):
         row : DataRow
             The data row to populate with items
         """
+        self._check_connected()
         row_dir = self.get_row_path(row)
         if not row_dir.exists():
             return
@@ -123,67 +104,6 @@ class MockRemoteStore(RemoteStore):
                 datatype=datatype,
                 uri=entry_path,
             )
-
-    def get(self, entry: DataEntry, datatype: type) -> DataType:
-        if entry.datatype.is_fileset:
-            value = self.iterdir(entry.uri)
-        elif entry.datatype.is_field:
-            with open(entry.uri / self.FIELDS_FILE) as f:
-                value = f.read()
-        else:
-            raise DatatypeUnsupportedByStoreError(entry.datatype, self)
-        return datatype(value)
-
-    def put(self, item: DataType, entry: DataEntry) -> DataType:
-        """
-        Inserts or updates the fileset into the store
-
-        Parameters
-        ----------
-        fileset : FileSet
-            The fileset to insert into the store
-        fspaths : list[Path]
-            The file-system paths to the files/directories to sync
-
-        Returns
-        -------
-        cached_paths : list[str]
-            The paths of the files where they are cached in the file system
-        """
-        if entry.datatype.is_fileset:
-            if entry.uri.exists():
-                shutil.rmtree(entry.uri)
-            cpy = item.copy_to(entry.uri, make_dirs=True)
-        elif entry.datatype.is_field:
-            with open(entry.uri / self.FIELDS_FILE, "w") as f:
-                f.write(str(item))
-            cpy = item
-        else:
-            raise DatatypeUnsupportedByStoreError(entry.datatype, self)
-        return cpy
-
-    def post(
-        self, item: DataType, path: str, datatype: type, row: DataRow
-    ) -> DataEntry:
-        entry = row.add_entry(
-            path=path, datatype=datatype, uri=self.get_row_path(row) / path
-        )
-        self.put(item, entry)
-        return entry
-
-    def get_provenance(self, entry: DataEntry) -> dict[str, ty.Any]:
-        prov_path = entry.uri.with_suffix(".json")
-        if prov_path.exists():
-            with open(prov_path) as f:
-                provenance = json.load(f)
-        else:
-            provenance = None
-        return provenance
-
-    def put_provenance(self, provenance: dict[str, ty.Any], entry: DataEntry):
-        prov_path = entry.uri.with_suffix(".json")
-        with open(prov_path, "w") as f:
-            json.dumps(provenance, f)
 
     def save_dataset_definition(
         self, dataset_id: str, definition: ty.Dict[str, ty.Any], name: str
@@ -201,6 +121,7 @@ class MockRemoteStore(RemoteStore):
         name: str
             Name for the dataset definition to distinguish it from other
             definitions for the same directory/project"""
+        self._check_connected()
         definition_path = self.definition_save_path(dataset_id, name)
         definition_path.parent.mkdir(exist_ok=True)
         with open(definition_path, "w") as f:
@@ -224,6 +145,7 @@ class MockRemoteStore(RemoteStore):
         definition: dict[str, Any]
             A dct Dataset object that was saved in the data store
         """
+        self._check_connected()
         fpath = self.definition_save_path(dataset_id, name)
         if fpath.exists():
             with open(fpath) as f:
@@ -232,51 +154,130 @@ class MockRemoteStore(RemoteStore):
             definition = None
         return definition
 
+    def connect(self):
+        """
+        If a connection session is required to the store manage it here
+        """
+        self.connected = True
+
+    def disconnect(self, session):
+        """
+        If a connection session is required to the store manage it here
+        """
+        self.connected = False
+
+    def get_provenance(self, entry: DataEntry) -> dict[str, ty.Any]:
+        self._check_connected()
+        prov_path = entry.uri.with_suffix(".json")
+        if prov_path.exists():
+            with open(prov_path) as f:
+                provenance = json.load(f)
+        else:
+            provenance = None
+        return provenance
+
+    def put_provenance(self, provenance: dict[str, ty.Any], entry: DataEntry):
+        self._check_connected()
+        prov_path = entry.uri.with_suffix(".json")
+        with open(prov_path, "w") as f:
+            json.dumps(provenance, f)
+
+    def create_test_dataset_data(
+        self, blueprint: TestDatasetBlueprint, dataset_id: str, source_data: Path = None
+    ):
+        """Create test data within store for test routines"""
+        dataset_path = Path(dataset_id) / self.LEAVES_DIR
+        dataset_path.mkdir(parents=True)
+        for ids in self.iter_test_blueprint(blueprint):
+            row_path = dataset_path / self.get_row_dirname_from_ids(
+                ids, blueprint.hierarchy
+            )
+            row_path.mkdir(parents=True)
+            for fname in blueprint.files:
+                cell_path = row_path / fname.split(".")[0]
+                self.create_test_fsobject(fname, cell_path, source_data=source_data)
+
+    ################################
+    # RemoteStore-specific methods #
+    ################################
+
+    def download_files(self, entry: DataEntry, download_dir: Path, target_path: Path):
+        self._check_connected()
+        fileset = FileSet(self.iterdir(entry.uri))
+        time.sleep(self.mock_delay)
+        fileset.copy_to(target_path)
+
+    def upload_files(self, cache_path: Path, entry: DataEntry):
+        self._check_connected()
+        if entry.uri.exists():
+            shutil.rmtree(entry.uri)
+        shutil.copytree(cache_path, entry.uri, make_dirs=True)
+        checksums = self.calculate_checksums(FileSet(cache_path.iterdir()))
+        with open(cache_path / self.CHECKSUMS_FILE, "w") as f:
+            json.dump(checksums, f)
+
+    def download_value(self, entry: DataEntry):
+        self._check_connected()
+        with open(entry.uri / self.FIELDS_FILE) as f:
+            value = f.read()
+        return value
+
+    def upload_value(self, value, entry: DataEntry):
+        self._check_connected()
+        with open(entry.uri / self.FIELDS_FILE, "w") as f:
+            f.write(str(value))
+
+    def create_fileset_entry(
+        self, path: str, datatype: type, row: DataRow
+    ) -> DataEntry:
+        return self.create_entry(path=path, datatype=datatype, row=row)
+
+    def create_field_entry(self, path: str, datatype: type, row: DataRow) -> DataEntry:
+        return self.create_entry(path=path, datatype=datatype, row=row)
+
+    def get_checksums(self, uri: str) -> dict[str, str]:
+        """
+        Downloads the checksum digests associated with the files in the file-set.
+        These are saved with the downloaded files in the cache and used to
+        check if the files have been updated on the server
+
+        Parameters
+        ----------
+        uri: str
+            uri of the data item to download the checksums for
+        """
+        with open(Path(uri) / self.CHECKSUMS_FILE) as f:
+            checksums = json.load(f)
+        return checksums
+
+    def calculate_checksums(self, fileset: FileSet) -> dict[str, str]:
+        """
+        Downloads the checksum digests associated with the files in the file-set.
+        These are saved with the downloaded files in the cache and used to
+        check if the files have been updated on the server
+
+        Parameters
+        ----------
+        uri: str
+            uri of the data item to download the checksums for
+        """
+        return fileset.hash_files()
+
+    # def create_empty_dataset(self):
+    #     raise NotImplementedError
+
+    ##################
+    # Helper methods #
+    ##################
+
+    def create_entry(self, path: str, datatype: type, row: DataRow) -> DataEntry:
+        self._check_connected()
+        return row.add_entry(
+            path=path, datatype=datatype, uri=self.get_row_path(row) / path
+        )
+
     def definition_save_path(self, dataset_id, name):
         return Path(dataset_id) / self.METADATA_DIR / (name + ".yml")
-
-    def site_licenses_dataset(self):
-        """Provide a place to store hold site-wide licenses"""
-        if self.cache_dir is None:
-            raise Exception("Cache dir needs to be set")
-        dataset_root = self.cache_dir / self.SITE_LICENSES_DIR
-        if not dataset_root.exists():
-            (dataset_root / self.LEAVES_DIR).mkdir(parents=True)
-        try:
-            dataset = self.load_dataset_definition(dataset_root, name="site_licenses")
-        except KeyError:
-            dataset = self.define_dataset(dataset_root, space=TestDataSpace)
-        return dataset
-
-    def create_empty_dataset(self):
-        raise NotImplementedError
-
-    def get_field_value(self, field):
-        """
-        Extract and return the value of the field from the store
-
-        Parameters
-        ----------
-        field : Field
-            The field to retrieve the value for
-
-        Returns
-        -------
-        value : int | float | str | ty.List[int] | ty.List[float] | ty.List[str]
-            The value of the Field
-        """
-        raise NotImplementedError
-
-    def put_field_value(self, field, value):
-        """
-        Inserts or updates the fields into the store
-
-        Parameters
-        ----------
-        field : Field
-            The field to insert into the store
-        """
-        raise NotImplementedError
 
     @classmethod
     def get_row_path(cls, row: DataRow):
@@ -333,21 +334,12 @@ class MockRemoteStore(RemoteStore):
             d
             for d in Path(dr).iterdir()
             if not (
-                d.name.startswith(".") or any(d.name.endswith(s) for s in skip_suffixes)
+                d.name == cls.CHECKSUMS_FILE
+                or d.name.startswith(".")
+                or any(d.name.endswith(s) for s in skip_suffixes)
             )
         )
 
-    def create_test_dataset_data(
-        self, blueprint: TestDatasetBlueprint, dataset_id: str, source_data: Path = None
-    ):
-        """Create test data within store for test routines"""
-        dataset_path = Path(dataset_id) / self.LEAVES_DIR
-        dataset_path.mkdir(parents=True)
-        for ids in self.iter_test_blueprint(blueprint):
-            row_path = dataset_path / self.get_row_dirname_from_ids(
-                ids, blueprint.hierarchy
-            )
-            row_path.mkdir(parents=True)
-            for fname in blueprint.files:
-                cell_path = row_path / fname.split(".")[0]
-                self.create_test_fsobject(fname, cell_path, source_data=source_data)
+    def _check_connected(self):
+        if not self.connected:
+            raise RuntimeError("Mock data store has not been connected")
