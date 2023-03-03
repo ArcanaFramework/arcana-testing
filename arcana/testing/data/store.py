@@ -85,20 +85,22 @@ class MockRemoteStore(RemoteStore):
         """
         with self.connection:
             self._check_connected()
-            row_dir = self.get_row_path(row)
-            if not row_dir.exists():
-                return
-            for entry_path in self.iterdir(row_dir, skip_suffixes=[".json"]):
-                datatype = (
-                    Field
-                    if entry_path / self.FIELDS_FILE in entry_path.iterdir()
-                    else FileSet
-                )
-                row.add_entry(
-                    path=entry_path.name,
-                    datatype=datatype,
-                    uri=entry_path.relative_to(self.mock_remote_dir),
-                )
+            for dataset_name in (None, row.dataset.name):
+                row_dir = self.get_row_path(row, dataset_name=dataset_name)
+                if not row_dir.exists():
+                    continue
+                for path in self.iterdir(row_dir, skip_suffixes=[".json"]):
+                    datatype = (
+                        Field
+                        if path / self.FIELDS_FILE in path.iterdir()
+                        else FileSet
+                    )
+                    entry_path = "@" + dataset_name + path.name if dataset_name else path.name
+                    row.add_entry(
+                        path=entry_path,
+                        datatype=datatype,
+                        uri=path.relative_to(self.mock_remote_dir),
+                    )
 
     def save_dataset_definition(
         self, dataset_id: str, definition: ty.Dict[str, ty.Any], name: str
@@ -275,8 +277,14 @@ class MockRemoteStore(RemoteStore):
 
     def create_entry(self, path: str, datatype: type, row: DataRow) -> DataEntry:
         self._check_connected()
+        if path.startswith("@"):
+            dataset_name = path.split("/")[0].lstrip("@")
+        else:
+            dataset_name = None
         entry = row.add_entry(
-            path=path, datatype=datatype, uri=self.get_row_path(row) / path
+            path=path,
+            datatype=datatype,
+            uri=self.get_row_path(row, dataset_name=dataset_name) / path,
         )
         self.entry_fspath(entry).mkdir(parents=True)
         return entry
@@ -284,9 +292,9 @@ class MockRemoteStore(RemoteStore):
     def definition_save_path(self, dataset_id, name):
         return self.dataset_fspath(dataset_id) / self.METADATA_DIR / (name + ".yml")
 
-    def get_row_path(self, row: DataRow):
+    def get_row_path(self, row: DataRow, dataset_name=None):
         dataset_fspath = self.dataset_fspath(row.dataset)
-        if row.frequency == max(row.dataset.space):
+        if dataset_name is None:
             row_path = (
                 dataset_fspath
                 / self.LEAVES_DIR
@@ -299,7 +307,7 @@ class MockRemoteStore(RemoteStore):
                 row_dirname = self.get_row_dirname_from_ids(
                     row.ids, row.frequency.span()
                 )
-            row_path = dataset_fspath / self.NODES_DIR / row_dirname
+            row_path = dataset_fspath / self.DERIVS_DIR / dataset_name / row_dirname
         return row_path
 
     @classmethod
@@ -308,8 +316,7 @@ class MockRemoteStore(RemoteStore):
     ):
         space = type(hierarchy[0])
         # Ensure that ID keys are DataSpace enums not strings
-        ids = {space[str(f)]: i for f, i in ids.items()}
-        row_dirname = ".".join(f"{h}={ids[h]}" for h in hierarchy)
+        row_dirname = ".".join(f"{space[str(f)]}={i}" for f, i in sorted(ids.items()))
         return row_dirname
 
     @classmethod
