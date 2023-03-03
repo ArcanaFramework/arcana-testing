@@ -86,7 +86,10 @@ class MockRemoteStore(RemoteStore):
         with self.connection:
             self._check_connected()
             for dataset_name in (None, row.dataset.name):
-                row_dir = self.get_row_path(row, dataset_name=dataset_name)
+                try:
+                    row_dir = self.get_row_path(row, dataset_name=dataset_name)
+                except NotInHierarchyException:
+                    continue
                 if not row_dir.exists():
                     continue
                 for path in self.iterdir(row_dir, skip_suffixes=[".json"]):
@@ -320,7 +323,10 @@ class MockRemoteStore(RemoteStore):
         space = type(hierarchy[0])
         # Ensure that ID keys are DataSpace enums not strings
         ids = {space[str(f)]: i for f, i in ids.items()}
-        row_dirname = ".".join(f"{h}={ids[h]}" for h in hierarchy)
+        try:
+            row_dirname = ".".join(f"{h}={ids[h]}" for h in hierarchy)
+        except KeyError:
+            raise NotInHierarchyException
         return row_dirname
 
     @classmethod
@@ -358,3 +364,7 @@ class MockRemoteStore(RemoteStore):
     def _check_connected(self):
         if not self.connected:
             raise RuntimeError("Mock data store has not been connected")
+
+
+class NotInHierarchyException(Exception):
+    pass
