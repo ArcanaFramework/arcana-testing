@@ -95,7 +95,7 @@ class MockRemoteStore(RemoteStore):
                         if path / self.FIELDS_FILE in path.iterdir()
                         else FileSet
                     )
-                    entry_path = "@" + dataset_name + path.name if dataset_name else path.name
+                    entry_path = f"@{dataset_name}/{path.name}" if dataset_name else path.name
                     row.add_entry(
                         path=entry_path,
                         datatype=datatype,
@@ -278,7 +278,10 @@ class MockRemoteStore(RemoteStore):
     def create_entry(self, path: str, datatype: type, row: DataRow) -> DataEntry:
         self._check_connected()
         if path.startswith("@"):
-            dataset_name = path.split("/")[0].lstrip("@")
+            parts = path.split("/")
+            assert len(parts) >= 2
+            dataset_name = parts[0].lstrip("@")
+            path = "/".join(parts[1:])
         else:
             dataset_name = None
         entry = row.add_entry(
@@ -316,7 +319,8 @@ class MockRemoteStore(RemoteStore):
     ):
         space = type(hierarchy[0])
         # Ensure that ID keys are DataSpace enums not strings
-        row_dirname = ".".join(f"{space[str(f)]}={i}" for f, i in sorted(ids.items()))
+        ids = {space[str(f)]: i for f, i in ids.items()}
+        row_dirname = ".".join(f"{h}={ids[h]}" for h in hierarchy)
         return row_dirname
 
     @classmethod
